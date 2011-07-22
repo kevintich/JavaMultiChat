@@ -1,0 +1,200 @@
+import java.io.*;
+import java.awt.*;
+import java.net.*;
+import java.awt.event.*;
+import javax.swing.*;
+import java.util.*;
+
+class ClientEvent {
+	public int character;
+}
+
+interface ClientListener {
+	public void clientAction(ClientEvent ce, Socket senderClient);
+}
+/*
+ * Inner- class HandleChatClient
+ * creates inputstreams and output streams associated with specific sockets
+ * Stores usernames for persons who have logged in 
+ * Writes to a server log file.
+ * 
+ */
+class HandleChatClient extends Thread {
+	String userName;
+	ClientListener cl;
+	Socket client;
+	InputStream is;
+	OutputStream os;
+	FileWriter logFileWriter;
+	File file;
+	BufferedWriter bw;
+	StringBuffer sb;
+	/**
+	 * @return socket
+	 */
+	public Socket getSocket() {
+		return client;
+	}
+
+	/**
+	 * @return username
+	 */
+	public String getUserName() {
+		return userName;
+	}
+
+	public HandleChatClient(Socket newClient, ClientListener cl) {
+		this.cl = cl;
+		client = newClient; // remember the client connection.
+		try {
+
+			is = client.getInputStream();
+			os = client.getOutputStream();
+
+		} catch (IOException i) {
+			System.err
+					.println("Error while getting inputStream or outputStream from client Socket");
+		}
+	}
+
+	/*
+	 * (non-Javadoc)
+	 * @see java.lang.Thread#run()
+	 * Run method is responsibe for getting input from the Clients via 
+	 * input streams.send back to the
+	 * 
+	 */
+	public void run() {
+		ClientEvent ce;
+		ce = new ClientEvent();
+		FileWriter fw;
+		try {
+			fw = new FileWriter("DAI_CHAT_Server.log");
+
+			BufferedWriter br = new BufferedWriter(fw);
+			
+			
+			/*
+			 * Next 10lines are used to store all usernames immediately client type them
+			 *in the Dialog Box.
+			 */
+			sb = new StringBuffer();
+			System.err.println("Before the username stage");
+			do {
+				ce.character = is.read();
+				if (ce.character != 10) {
+					sb.append((char)ce.character);
+				}
+			} while (ce.character != 10);
+			userName = sb.toString();
+			System.err.println("Passed the username stage");
+			
+			
+			
+			/*
+			 * While loop writes all characters to a log file
+			 * 
+			 */
+			while (true) {
+				try {
+					ce.character = is.read();
+					br.write(ce.character);
+					br.flush();
+					if (ce.character >= 0) {
+						cl.clientAction(ce, client); // report back to server,the event and who sends
+					} else {
+						client.close();
+						break;
+
+					}
+				} catch (IOException i) {
+					System.err
+							.println("Error while reading character from input socket");
+					break; // Stop the thread by breaking out of loop.
+
+				}
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+
+	}
+
+}
+
+public class MultiClientChatServer implements ClientListener {
+	Vector handleChatClients;
+	ServerSocket ss;
+
+	public static void main(String[] args) {
+		MultiClientChatServer mccs = new MultiClientChatServer(9999);
+	}
+
+	public MultiClientChatServer(int portNo) {
+		handleChatClients = new Vector(); // create a vector holding sockets of clients
+		try {
+			ss = new ServerSocket(portNo); // Make ready for connections from
+			// clients
+		} catch (IOException i1) {
+			System.err.println("Could not .accept connection");
+		}
+		while (true) {
+			try {
+				Socket newClient = ss.accept();
+				// serve the new client on a platter for HandleChatClient.
+				// Make it possible via the ClientListener interface (this) to
+				// call back with events
+				// arising from each client for distribution to other clients.
+				HandleChatClient hcc = new HandleChatClient(newClient, this);
+				hcc.start(); // start the thread handling the client.
+				hcc.getName();
+				synchronized (handleChatClients) {
+					handleChatClients.add(hcc); // add client to list, once accepted...
+				}
+			} catch (IOException i2) {
+				System.err.println("Could not .accept connection");
+			}
+		} // while (true)
+	}
+
+	public void clientAction(ClientEvent ce, Socket senderClient) {
+		HandleChatClient sTemp;
+		InputStream is;
+		OutputStream os;
+		synchronized (handleChatClients) {
+			Iterator i = handleChatClients.iterator();
+			while (i.hasNext()) {
+				// Activity tracer: System.err.print(".");
+
+				sTemp = (HandleChatClient) i.next();
+				if (sTemp.getSocket() == senderClient)
+					continue; // Don't write back to the writer...
+				try {
+					is = sTemp.getSocket().getInputStream();
+					os = sTemp.getSocket().getOutputStream();
+					if (ce.character == 10) {
+						os.write((char) ce.character);
+						String user = sTemp.getUserName();
+						
+						System.out.println(user); //test if users have been aquired from the method getUserName();					
+						for (int ix = 0; ix < user.length(); ix++) {
+							System.out.println();
+							os.write((char)user.charAt(ix));// writes to all client the usernames of the persons who are online
+						}
+					}
+
+					os.write((char) ce.character); // write the event to the respective socket.(send message to all clients)
+				} catch (IOException i3) {
+					System.err
+							.println("Cannot get inputStream or outputStream from client socket");
+
+					i.remove(); // removes a connection if errors on it...
+
+				}
+			}
+		} // synchronized on sockets: Send to all clients and remove dormant
+		// clients...
+	}
+
+}
